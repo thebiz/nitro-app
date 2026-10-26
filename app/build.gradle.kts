@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Build-Nummer kommt von GitHub Actions, lokal 1
+val buildNumber = (project.findProperty("buildNumber") as String?)?.toIntOrNull() ?: 1
+
 android {
     namespace = "com.john.nitro"
     compileSdk = 35
@@ -11,8 +14,8 @@ android {
         applicationId = "com.john.nitro"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = buildNumber
+        versionName = "0.$buildNumber"
     }
 
     // Fester Schlüssel im Repo, damit sich neue Versionen über die alte installieren lassen

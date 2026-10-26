@@ -33,6 +33,9 @@ class GameView(context: Context) : View(context) {
     private val cars = ArrayList<Car>()
     private lateinit var player: Car
     private val rnd = Random(System.nanoTime())
+    private val sound = EngineSound()
+    private val updater = Updater(context)
+    private val updateBtn = RectF()
 
     private var state = State.TITLE
     private var countdown = 0f
@@ -70,7 +73,9 @@ class GameView(context: Context) : View(context) {
         val curbBase = Path()
         val curbRed = Path()
         val edges = Path()
+        val barrier = Path()
     }
+    private val barrierOff get() = track.half + 40f
     private val chunks = ArrayList<Chunk>()
     private val startWhitePath = Path()
     private val startBlackPath = Path()
@@ -93,6 +98,12 @@ class GameView(context: Context) : View(context) {
     private val curbRed = paint(Color.rgb(214, 48, 49))
     private val edgeLine = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; strokeWidth = 3f; color = Color.rgb(132, 132, 138)
+    }
+    private val barrierDark = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = 16f; strokeJoin = Paint.Join.ROUND; color = Color.rgb(30, 30, 34)
+    }
+    private val barrierLight = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = 9f; strokeJoin = Paint.Join.ROUND; color = Color.rgb(205, 210, 218)
     }
     private val black = paint(Color.rgb(20, 20, 22))
     private val white = paint(Color.WHITE)
@@ -156,12 +167,17 @@ class GameView(context: Context) : View(context) {
         var i0 = 0
         while (i0 < n) {
             val count = min(size, n - i0)   // ein Segment Überlappung zum nächsten Stück
-            val box = RectF(Float.MAX_VALUE, Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE)
+            var l = Float.MAX_VALUE
+            var t = Float.MAX_VALUE
+            var r = -Float.MAX_VALUE
+            var b = -Float.MAX_VALUE
             for (k in 0..count) {
                 val i = track.wrap(i0 + k)
-                box.union(track.xs[i], track.ys[i])
+                l = min(l, track.xs[i]); r = max(r, track.xs[i])
+                t = min(t, track.ys[i]); b = max(b, track.ys[i])
             }
-            box.inset(-(h + curb + 10f), -(h + curb + 10f))
+            val m = barrierOff + 20f
+            val box = RectF(l - m, t - m, r + m, b + m)
             val c = Chunk(box)
             band(c.curbBase, i0, count, h + curb)
             band(c.asphalt, i0, count, h)
@@ -177,6 +193,11 @@ class GameView(context: Context) : View(context) {
                 val off = (h - 10f) * side
                 c.edges.moveTo(px(i0, off), py(i0, off))
                 for (k in 1..count) { val i = track.wrap(i0 + k); c.edges.lineTo(px(i, off), py(i, off)) }
+            }
+            for (side in floatArrayOf(1f, -1f)) {
+                val off = barrierOff * side
+                c.barrier.moveTo(px(i0, off), py(i0, off))
+                for (k in 1..count) { val i = track.wrap(i0 + k); c.barrier.lineTo(px(i, off), py(i, off)) }
             }
             chunks.add(c)
             i0 += size
@@ -222,7 +243,7 @@ class GameView(context: Context) : View(context) {
             val y = track.minY - margin + r.nextFloat() * (track.maxY - track.minY + 2 * margin)
             val rad = 28f + r.nextFloat() * 30f
             val i = track.nearestAll(x, y)
-            if (track.distTo(x, y, i) < track.half + 40f + rad) continue
+            if (track.distTo(x, y, i) < barrierOff + 30f + rad) continue
             treeX.add(x); treeY.add(y); treeR.add(rad)
         }
     }
@@ -293,15 +314,20 @@ class GameView(context: Context) : View(context) {
                 if (state == State.DONE) doneTimer += dt
             }
         }
+        val racing = state == State.RACE || state == State.DONE
+        sound.rpm = if (racing) min(1f, player.speed / 900f) else 0f
+        sound.load = if (racing && (player.throttle || player.nitroActive)) 1f else 0f
+        sound.nitro = racing && player.nitroActive
+
         // Kamera folgt dem Spieler mit etwas Vorausschau
-        val tx = player.x + player.vx * 0.3f
-        val ty = player.y + player.vy * 0.3f
+        val tx = player.x + player.vx * 0.4f
+        val ty = player.y + player.vy * 0.4f
         val k = min(1f, dt * 5f)
         camX += (tx - camX) * k
         camY += (ty - camY) * k
         if (height > 0) {
-            val base = height / 950f
-            val target = base * (1f - 0.14f * min(1f, player.speed / 900f))
+            val base = height / 680f
+            val target = base * (1f - 0.22f * min(1f, player.speed / 900f))
             zoom += (target - zoom) * min(1f, dt * 2f)
         }
     }
@@ -405,6 +431,29 @@ class GameView(context: Context) : View(context) {
         c.x += c.vx * dt
         c.y += c.vy * dt
 
+        // Leitplanke: abprallen und Tempo verlieren
+        val limit = barrierOff - carRadius
+        val dx = c.x - track.xs[c.idx]
+        val dy = c.y - track.ys[c.idx]
+        val dist = hypot(dx, dy)
+        if (dist > limit && dist > 0.001f) {
+            val nx = dx / dist
+            val ny = dy / dist
+            c.x = track.xs[c.idx] + nx * limit
+            c.y = track.ys[c.idx] + ny * limit
+            val vn = c.vx * nx + c.vy * ny
+            if (vn > 0f) {
+                c.vx -= nx * vn * 1.4f
+                c.vy -= ny * vn * 1.4f
+                c.vx *= 0.88f
+                c.vy *= 0.88f
+                if (c.isPlayer && vn > 60f) {
+                    sound.bump(vn / 500f)
+                    buzz()
+                }
+            }
+        }
+
         // Runden und Ziel
         val ld = floor(c.progress / track.n).toInt()
         if (ld > c.lapsDone) {
@@ -421,8 +470,11 @@ class GameView(context: Context) : View(context) {
         }
     }
 
+    private val carScale = 1.35f
+    private val carRadius = 21f * carScale
+
     private fun collide() {
-        val r = 21f
+        val r = carRadius
         for (a in 0 until cars.size) for (b in a + 1 until cars.size) {
             val c1 = cars[a]
             val c2 = cars[b]
@@ -440,7 +492,10 @@ class GameView(context: Context) : View(context) {
                 val j = vn * 0.75f
                 c1.vx -= j * nx; c1.vy -= j * ny
                 c2.vx += j * nx; c2.vy += j * ny
-                if (c1.isPlayer || c2.isPlayer) buzz()
+                if (c1.isPlayer || c2.isPlayer) {
+                    buzz()
+                    sound.bump(vn / 400f)
+                }
             }
         }
     }
@@ -450,6 +505,17 @@ class GameView(context: Context) : View(context) {
         while (d > PI) d -= (2 * PI).toFloat()
         while (d < -PI) d += (2 * PI).toFloat()
         return d
+    }
+
+    fun resume() {
+        lastNanos = 0L
+        sound.start()
+        if (state == State.TITLE) updater.check()
+    }
+
+    fun pause() {
+        sound.stop()
+        pressed.fill(false)
     }
 
     private var lastBuzz = 0f
@@ -485,7 +551,7 @@ class GameView(context: Context) : View(context) {
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        zoom = h / 950f
+        zoom = h / 680f
         layoutButtons(w, h)
         // Minikarte oben rechts
         miniH = h * 0.26f
@@ -561,6 +627,8 @@ class GameView(context: Context) : View(context) {
         for (c in visible) canvas.drawPath(c.curbRed, curbRed)
         for (c in visible) canvas.drawPath(c.asphalt, asphalt)
         for (c in visible) canvas.drawPath(c.edges, edgeLine)
+        for (c in visible) canvas.drawPath(c.barrier, barrierDark)
+        for (c in visible) canvas.drawPath(c.barrier, barrierLight)
         canvas.drawPath(startWhitePath, white)
         canvas.drawPath(startBlackPath, black)
 
@@ -580,7 +648,7 @@ class GameView(context: Context) : View(context) {
             val pulse = 0.5f + 0.5f * sin(time * 6f)
             playerRing.strokeWidth = 4f
             playerRing.alpha = (120 + 120 * pulse).toInt()
-            canvas.drawCircle(player.x, player.y, 40f + 6f * pulse, playerRing)
+            canvas.drawCircle(player.x, player.y, 52f + 6f * pulse, playerRing)
         }
 
         for (c in cars) drawCar(canvas, c)
@@ -590,8 +658,9 @@ class GameView(context: Context) : View(context) {
     private fun drawCar(canvas: Canvas, c: Car) {
         val deg = Math.toDegrees(c.heading.toDouble()).toFloat()
         canvas.save()
-        canvas.translate(c.x + 5f, c.y + 7f)
+        canvas.translate(c.x + 7f, c.y + 9f)
         canvas.rotate(deg)
+        canvas.scale(carScale, carScale)
         rect.set(-23f, -13f, 23f, 13f)
         canvas.drawRoundRect(rect, 7f, 7f, shadow)
         canvas.restore()
@@ -599,6 +668,7 @@ class GameView(context: Context) : View(context) {
         canvas.save()
         canvas.translate(c.x, c.y)
         canvas.rotate(deg)
+        canvas.scale(carScale, carScale)
 
         // Nitro-Flamme
         if (c.nitroActive) {
@@ -742,14 +812,14 @@ class GameView(context: Context) : View(context) {
         text.textAlign = Paint.Align.CENTER
         text.textSize = 96 * dp
         text.color = Color.rgb(255, 210, 63)
-        canvas.drawText("NITRO", w / 2f, h * 0.38f, text)
+        canvas.drawText("NITRO", w / 2f, h * 0.32f, text)
         text.textSize = 18 * dp
         text.color = Color.argb(220, 255, 255, 255)
-        canvas.drawText("3 Runden · 4 Wagen · du startest von hinten", w / 2f, h * 0.38f + 34 * dp, text)
+        canvas.drawText("3 Runden · 4 Wagen · du startest von hinten", w / 2f, h * 0.32f + 34 * dp, text)
 
         val bw = 200 * dp
         val bh = 58 * dp
-        menuBtn.set(w / 2f - bw / 2f, h * 0.58f, w / 2f + bw / 2f, h * 0.58f + bh)
+        menuBtn.set(w / 2f - bw / 2f, h * 0.52f, w / 2f + bw / 2f, h * 0.52f + bh)
         fill.color = Color.argb(60, 255, 255, 255)
         canvas.drawRoundRect(menuBtn, bh / 2f, bh / 2f, fill)
         outline.strokeWidth = 3 * dp
@@ -762,6 +832,35 @@ class GameView(context: Context) : View(context) {
         text.textSize = 14 * dp
         text.color = Color.argb(170, 255, 255, 255)
         canvas.drawText("Links lenken  ·  rechts Gas und Nitro", w / 2f, h - 28 * dp, text)
+        text.textAlign = Paint.Align.LEFT
+        text.textSize = 12 * dp
+        text.color = Color.argb(140, 255, 255, 255)
+        canvas.drawText("Version ${updater.currentName}", safeL + 18 * dp, h - 28 * dp, text)
+
+        // Update von GitHub
+        updateBtn.setEmpty()
+        val label = when (updater.status) {
+            Updater.Status.AVAILABLE -> "Update auf 0.${updater.latest} laden"
+            Updater.Status.DOWNLOADING -> "Lädt … ${(updater.progress * 100).toInt()} %"
+            Updater.Status.INSTALLING -> "Installation läuft …"
+            Updater.Status.FAILED -> "Update fehlgeschlagen – nochmal?"
+            Updater.Status.IDLE -> null
+        }
+        if (label != null) {
+            val uw = 300 * dp
+            val uh = 44 * dp
+            val top = menuBtn.bottom + 16 * dp
+            updateBtn.set(w / 2f - uw / 2f, top, w / 2f + uw / 2f, top + uh)
+            fill.color = Color.argb(70, 255, 140, 40)
+            canvas.drawRoundRect(updateBtn, uh / 2f, uh / 2f, fill)
+            outline.strokeWidth = 2 * dp
+            outline.color = Color.rgb(255, 160, 60)
+            canvas.drawRoundRect(updateBtn, uh / 2f, uh / 2f, outline)
+            text.textAlign = Paint.Align.CENTER
+            text.textSize = 18 * dp
+            text.color = Color.WHITE
+            canvas.drawText(label, w / 2f, updateBtn.centerY() + 6 * dp, text)
+        }
     }
 
     private fun drawResults(canvas: Canvas, w: Float, h: Float) {
@@ -835,8 +934,15 @@ class GameView(context: Context) : View(context) {
             val x = e.getX(i)
             val y = e.getY(i)
             val inMenu = menuBtn.contains(x, y)
-            if (state == State.TITLE && inMenu) startRace()
-            else if (state == State.DONE && doneTimer >= 1.2f && inMenu) startRace()
+            if (state == State.TITLE && updateBtn.contains(x, y) &&
+                (updater.status == Updater.Status.AVAILABLE || updater.status == Updater.Status.FAILED)
+            ) {
+                if (updater.status == Updater.Status.FAILED) updater.check() else updater.download()
+            } else if (state == State.TITLE && inMenu) startRace()
+            else if (state == State.DONE && doneTimer >= 1.2f && inMenu) {
+                updater.check()
+                startRace()
+            }
         }
         pressed.fill(false)
         if (action != MotionEvent.ACTION_UP && action != MotionEvent.ACTION_CANCEL) {
