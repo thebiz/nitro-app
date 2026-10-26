@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Rennwagen von oben, nur Outlines, passend zu den anderen App-Icons -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Karosserie -->
+    <path
+        android:strokeColor="#F2F2F2"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M51,34 h6 a5,5 0 0 1 5,5 v28 a5,5 0 0 1 -5,5 h-6 a5,5 0 0 1 -5,-5 v-28 a5,5 0 0 1 5,-5 z" />
+
+    <!-- Cockpit -->
+    <path
+        android:strokeColor="#F2F2F2"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M54,48 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -8,0 v-4 a4,4 0 0 1 4,-4 z" />
+
+    <!-- Flügel und Räder -->
+    <path
+        android:strokeColor="#F2F2F2"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M41,36 h26 M41,71 h26 M40,42 v7 M68,42 v7 M40,60 v7 M68,60 v7" />
+
+    <!-- Nitro-Strahlen -->
+    <path
+        android:strokeColor="#F2F2F2"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M48,78 v5 M54,78 v9 M60,78 v5" />
+</vector>
